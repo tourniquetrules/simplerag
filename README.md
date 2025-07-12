@@ -1,67 +1,91 @@
-# simplerag
-This is a simple chatbot with the addition of RAG capability for PDFs.  It is focused on emergency medicine.
-I used LM Studio API running on the network for the backend, running in Windows so that I could see the different parameters that are available.  Ollama works too but I found LM Studio easier.
-I used Python 3.11 as Python 3.12 had too many problems with PDF related dependencies.  It could be me...
-I used VS Code Copilot with Claude Sonnet 4 to generate code.
-I am using Gradio to generate the webpage and Cloudflare tunnels to host it from my PC.
-In general to get this running, 
+# 🚑 Emergency Medicine RAG Chat Interface
 
-download LM Studio from https://lmstudio.ai/
-Install python 3.11 and pip
-then pip install -r requirements.txt
-Open emergency_rag_chatbot.py and change your endpoint to your local computer or OPENAI or whatever you pick.  Beyond this it "might" work.
-then python3 emergency_rag_chatbot.py
+Advanced RAG system for emergency medicine using medical literature and abstracts.
 
-The general flow through the chatbot is:
+## 🚀 Quick Setup
 
-PDFs → PyPDF2 → chunk_text() → LM Studio Embedding API → FAISS Index
-                                                              ↓
-User Query → LM Studio Embedding API → FAISS Search → Top Chunks
-                                                              ↓
-Chunks + Query → create_rag_prompt() → DeepSeek LLM → Final Answer
+### Prerequisites
+- Python 3.11 or higher
+- LM Studio running with required models
 
-All abstracts or PDFs are in a subdirectory called abstracts.  
+### 📦 Installation
 
-🔧 Chunking
-Software: Custom Python function chunk_text()
+1. **Install Python dependencies:**
+```bash
+pip install -r requirements.txt
+```
 
-Framework: Pure Python with regex
-Method: Text splitting with sentence boundary detection
-Size: 512 characters per chunk with 50-character overlap
-Logic: Tries to break at sentence endings (.!?) within 100 characters of the target boundary
+2. **Run the application:**
+```bash
+python3 emergency_rag_chatbot.py
+```
 
-🔗 Embedding
-Software: LM Studio API
+3. **Access the interface:**
+   - Open your browser to: `http://localhost:7866`
 
-Model: text-embedding-all-minilm-l6-v2-embedding
-Framework: HTTP API calls to your LM Studio server
-Function: call_embedding_api() sends text to /v1/embeddings endpoint
-Output: Vector embeddings (numerical representations of text meaning)
+### 🔧 Configuration
 
-)
-🗄️ Database/Storage
-Vector Database: FAISS (Facebook AI Similarity Search)
+**Important:** Update the API endpoint in `emergency_rag_chatbot.py` to match your setup:
 
-Type: In-memory vector database
-Index: faiss.IndexFlatIP (Inner Product for cosine similarity)
-Storage: document_store[] (Python list) for metadata + text
-Persistence: RAM only (lost on restart unless you add persistence)
+```python
+# Change this to your local computer, OpenAI, or other endpoint
+LM_STUDIO_BASE_URL = "http://10.5.0.2:1234"
+```
 
-🔍 Similarity Search & Retrieval
-Software: FAISS + Custom logic
+### 🤖 Required Models
 
-Process:
-Query Embedding: User question → LM Studio embedding API
-Vector Search: FAISS finds most similar chunks
-Filtering: Only chunks above similarity threshold (0.3)
-Ranking: Top 5 most relevant chunks returned
-Function: retrieve_relevant_chunks()
+This application assumes you are using the following models in LM Studio:
 
-🤖 Final Answer Generation
-Software: LM Studio API
+#### LLM Model
+```
+deepseek/deepseek-r1-0528-qwen3-8b
+```
 
-Model: deepseek/deepseek-r1-0528-qwen3-8b
-Process:
-Context Assembly: create_rag_prompt() combines retrieved chunks with user question
-LLM Call: Enhanced prompt sent to DeepSeek model
-Response Processing: process_deepseek_response() extracts final answer from reasoning
+#### Embedding Model  
+```
+text-embedding-all-minilm-l6-v2-embedding
+```
+
+**Note:** If you're using different models, update the model names in the configuration section of `emergency_rag_chatbot.py`.
+
+### 📚 Usage
+
+1. **Upload PDFs:** Use the Knowledge Base Management section to upload emergency medicine abstracts
+2. **Ask Questions:** Type your medical questions in the chat interface
+3. **General Knowledge:** Use `@llm` prefix for non-medical questions that bypass the RAG system
+
+### 🛠️ Advanced Setup
+
+<details>
+<summary>Alternative Installation Methods</summary>
+
+#### Using virtual environment (recommended):
+```bash
+python3 -m venv emarag-env
+source emarag-env/bin/activate  # On Windows: emarag-env\Scripts\activate
+pip install -r requirements.txt
+```
+
+#### Manual dependency installation:
+```bash
+pip install gradio requests PyPDF2 numpy faiss-cpu
+```
+
+</details>
+
+### 📋 System Requirements
+
+- **Python:** 3.11+
+- **RAM:** 4GB+ recommended
+- **Storage:** 1GB+ for models and documents
+- **Network:** Access to LM Studio API endpoint
+
+---
+
+**Model Configuration:**
+- **LLM:** `deepseek/deepseek-r1-0528-qwen3-8b`
+- **Embedding:** `text-embedding-all-minilm-l6-v2-embedding`
+- **Focus:** Emergency Medicine Research & Practice
+
+💡 **Tip:** Use `@llm` at the start of your question for general knowledge (bypasses RAG)
+
