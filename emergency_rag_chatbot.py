@@ -12,10 +12,23 @@ from typing import List, Dict, Tuple
 import tempfile
 from pathlib import Path
 
+# Medical embedding imports
+try:
+    from sentence_transformers import SentenceTransformer
+    from transformers import AutoTokenizer, AutoModel
+    import torch
+    MEDICAL_EMBEDDINGS_AVAILABLE = True
+    print("✅ Medical embedding libraries available")
+except ImportError as e:
+    MEDICAL_EMBEDDINGS_AVAILABLE = False
+    print(f"⚠️  Medical embedding libraries not available: {e}")
+    print("📦 Run: pip install sentence-transformers transformers torch")
+
 # API configuration
 LM_STUDIO_BASE_URL = "http://10.5.0.2:1234"
 MODEL_NAME = "deepseek/deepseek-r1-0528-qwen3-8b"
-EMBEDDING_MODEL_NAME = "text-embedding-all-minilm-l6-v2-embedding"
+EMBEDDING_MODEL_NAME = "text-embedding-all-minilm-l6-v2-embedding"  # Fallback for LM Studio
+CLINICAL_BERT_MODEL = "emilyalsentzer/Bio_ClinicalBERT"  # Primary medical embedding model
 
 # RAG configuration
 CHUNK_SIZE = 512
@@ -32,20 +45,38 @@ max_conversation_length = 50
 
 # RAG components
 embedding_model = None
+clinical_bert_model = None  # Clinical-BERT model instance
 document_store = []  # List of document chunks with metadata
 faiss_index = None
 document_embeddings = []
+use_clinical_bert = True  # Primary embedding method
 
 def initialize_embedding_model():
-    """Initialize the embedding model (check LM Studio API)"""
-    global embedding_model
+    """Initialize the embedding model (Clinical-BERT preferred, LM Studio fallback)"""
+    global embedding_model, clinical_bert_model, use_clinical_bert
+    
+    # Try to initialize Clinical-BERT first
+    if MEDICAL_EMBEDDINGS_AVAILABLE:
+        try:
+            print("🏥 Initializing Clinical-BERT for medical embeddings...")
+            clinical_bert_model = SentenceTransformer(CLINICAL_BERT_MODEL)
+            use_clinical_bert = True
+            embedding_model = True
+            print("✅ Clinical-BERT loaded successfully")
+            print(f"📏 Embedding dimension: {clinical_bert_model.get_sentence_embedding_dimension()}")
+            return True
+        except Exception as e:
+            print(f"⚠️  Failed to load Clinical-BERT: {e}")
+            print("🔄 Falling back to LM Studio API...")
+    
+    # Fallback to LM Studio API
     try:
         print("🔄 Checking LM Studio embedding API...")
-        # Test the embedding API
         test_response = call_embedding_api(["test"])
         if test_response is not None:
-            embedding_model = True  # Just use as a flag
-            print("✅ LM Studio embedding API is accessible")
+            embedding_model = True
+            use_clinical_bert = False
+            print("✅ LM Studio embedding API is accessible (fallback mode)")
             return True
         else:
             print("❌ LM Studio embedding API not accessible")
@@ -54,8 +85,49 @@ def initialize_embedding_model():
         print(f"❌ Failed to connect to embedding API: {e}")
         return False
 
+def get_clinical_bert_embeddings(texts):
+    """Generate embeddings using Clinical-BERT"""
+    global clinical_bert_model
+    
+    if clinical_bert_model is None:
+        return None
+    
+    try:
+        print(f"🏥 Generating Clinical-BERT embeddings for {len(texts)} texts...")
+        start_time = time.time()
+        
+        # Generate embeddings
+        embeddings = clinical_bert_model.encode(
+            texts,
+            batch_size=8,  # Reasonable batch size
+            show_progress_bar=len(texts) > 10,
+            convert_to_numpy=True,
+            normalize_embeddings=True  # Important for cosine similarity
+        )
+        
+        end_time = time.time()
+        print(f"✅ Clinical-BERT embeddings generated in {end_time - start_time:.2f}s")
+        
+        return embeddings
+        
+    except Exception as e:
+        print(f"❌ Clinical-BERT embedding error: {e}")
+        return None
+
 def call_embedding_api(texts):
-    """Call LM Studio embedding API"""
+    """Generate embeddings using Clinical-BERT (preferred) or LM Studio API (fallback)"""
+    global use_clinical_bert
+    
+    # Try Clinical-BERT first
+    if use_clinical_bert and clinical_bert_model is not None:
+        embeddings = get_clinical_bert_embeddings(texts)
+        if embeddings is not None:
+            return embeddings
+        else:
+            print("⚠️  Clinical-BERT failed, falling back to LM Studio...")
+            use_clinical_bert = False
+    
+    # Fallback to LM Studio API
     url = f"{LM_STUDIO_BASE_URL}/v1/embeddings"
     
     headers = {
@@ -182,13 +254,17 @@ def process_pdf_document(pdf_file, doc_title: str = None) -> int:
         
         # Update FAISS index
         if faiss_index is None:
-            # Initialize FAISS index
+            # Initialize FAISS index with correct dimension
             dimension = chunk_embeddings.shape[1]
             faiss_index = faiss.IndexFlatIP(dimension)  # Inner product for cosine similarity
             document_embeddings = []
+            print(f"🗂️  Initialized FAISS index with dimension {dimension}")
         
-        # Normalize embeddings for cosine similarity
-        normalized_embeddings = chunk_embeddings / np.linalg.norm(chunk_embeddings, axis=1, keepdims=True)
+        # Normalize embeddings for cosine similarity (Clinical-BERT already normalized)
+        if use_clinical_bert:
+            normalized_embeddings = chunk_embeddings  # Already normalized
+        else:
+            normalized_embeddings = chunk_embeddings / np.linalg.norm(chunk_embeddings, axis=1, keepdims=True)
         
         # Add to FAISS index
         faiss_index.add(normalized_embeddings.astype('float32'))
@@ -216,10 +292,14 @@ def retrieve_relevant_chunks(query: str, k: int = MAX_RELEVANT_CHUNKS) -> List[D
             print("❌ Failed to encode query")
             return []
             
-        query_embedding = query_embedding / np.linalg.norm(query_embedding, axis=1, keepdims=True)
+        # Normalize query embedding (Clinical-BERT already normalized)
+        if use_clinical_bert:
+            query_embedding_norm = query_embedding  # Already normalized
+        else:
+            query_embedding_norm = query_embedding / np.linalg.norm(query_embedding, axis=1, keepdims=True)
         
         # Search FAISS index
-        scores, indices = faiss_index.search(query_embedding.astype('float32'), k)
+        scores, indices = faiss_index.search(query_embedding_norm.astype('float32'), k)
         
         # Filter by similarity threshold and return relevant chunks
         relevant_chunks = []
@@ -322,12 +402,15 @@ def call_lm_studio_api(messages, temperature=0.7, max_tokens=16384, stream=False
         "Content-Type": "application/json"
     }
     
+    # Add a conversation reset to ensure clean state
     payload = {
         "model": MODEL_NAME,
         "messages": messages,
         "temperature": temperature,
         "max_tokens": max_tokens,
-        "stream": stream
+        "stream": stream,
+        "stop": ["<|endoftext|>", "<|end|>"],  # Add stop tokens to prevent contamination
+        "presence_penalty": 0.1  # Slight penalty to prevent repetition
     }
     
     try:
@@ -621,6 +704,14 @@ def load_abstracts_directory(abstracts_dir="abstracts"):
     print(f"📊 Total: {total_chunks} chunks from {len([f for f in loaded_files if '✅' in f])} successful files")
     return total_chunks, loaded_files
 
+def get_embedding_status():
+    """Get current embedding model status"""
+    if use_clinical_bert and clinical_bert_model is not None:
+        return f"🏥 Clinical-BERT ({CLINICAL_BERT_MODEL})"
+    elif embedding_model:
+        return f"🔄 LM Studio API ({EMBEDDING_MODEL_NAME})"
+    else:
+        return "❌ No embedding model available"
 def get_session_stats():
     """Get session statistics"""
     global total_tokens_generated, total_time_spent, total_requests, conversation_id, document_store
@@ -651,7 +742,7 @@ def get_session_stats():
 
 **Model Configuration:**
 **LLM:** {MODEL_NAME}
-**Embedding Model:** {EMBEDDING_MODEL_NAME}
+**Embedding Model:** {get_embedding_status()}
 **API Endpoint:** {LM_STUDIO_BASE_URL}
 **Chunk Size:** {CHUNK_SIZE} tokens
 **Max Relevant Chunks:** {MAX_RELEVANT_CHUNKS}
@@ -698,7 +789,7 @@ with gr.Blocks(title="Emergency Medicine RAG Chat", theme=gr.themes.Soft()) as d
     Advanced RAG system for emergency medicine using medical literature and abstracts.
     
     **LLM:** `deepseek/deepseek-r1-0528-qwen3-8b`
-    **Embedding:** `text-embedding-all-minilm-l6-v2-embedding`
+    **Embedding:** `Clinical-BERT` (medical-specialized) + `LM Studio` (fallback)
     **Focus:** Emergency Medicine Research & Practice
     
     💡 **Tip:** Use `@llm` at the start of your question for general knowledge (bypasses RAG)
@@ -818,7 +909,7 @@ with gr.Blocks(title="Emergency Medicine RAG Chat", theme=gr.themes.Soft()) as d
                 temperature = gr.Slider(
                     minimum=0.0,
                     maximum=2.0,
-                    value=0.3,
+                    value=0.1,
                     step=0.1,
                     label="Temperature"
                 )
