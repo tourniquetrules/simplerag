@@ -1,12 +1,21 @@
 # 🚑 Emergency Medicine RAG Chat Interface
 
-Advanced RAG system for emergency medicine using medical literature and abstracts.
+Advanced RAG system for emergency medicine using medical literature and abstracts with **Clinical-BERT** medical embeddings.
+
+## 🏥 Key Features
+
+- **Medical-Specialized Embeddings:** Clinical-BERT for superior medical text understanding
+- **Hybrid Fallback System:** LM Studio API backup for reliability  
+- **Emergency Medicine Focus:** Optimized for emergency protocols and evidence-based care
+- **Session Isolation:** Clean separation between RAG and general knowledge queries
+- **Cloudflare Tunnel Support:** Secure remote access via `emarag.haydd.com`
 
 ## 🚀 Quick Setup
 
 ### Prerequisites
 - Python 3.11 or higher
 - LM Studio running with required models
+- CUDA-compatible GPU (recommended for Clinical-BERT)
 
 ### 📦 Installation
 
@@ -15,13 +24,19 @@ Advanced RAG system for emergency medicine using medical literature and abstract
 pip install -r requirements.txt
 ```
 
+If you don't have a requirements.txt, install manually:
+```bash
+pip install gradio requests PyPDF2 numpy faiss-cpu sentence-transformers transformers torch
+```
+
 2. **Run the application:**
 ```bash
 python3 emergency_rag_chatbot.py
 ```
 
 3. **Access the interface:**
-   - Open your browser to: `http://localhost:7866`
+   - **Local:** `http://localhost:7866`
+   - **Remote:** `https://emarag.haydd.com` (if Cloudflare tunnel configured)
 
 ### 🔧 Configuration
 
@@ -32,21 +47,33 @@ python3 emergency_rag_chatbot.py
 LM_STUDIO_BASE_URL = "http://10.5.0.2:1234"
 ```
 
-### 🤖 Required Models
+### 🤖 Model Configuration
 
-This application assumes you are using the following models in LM Studio:
+#### 🧠 LM Studio Setup
+Ensure LM Studio is running on port 1234 with:
+- **Chat Model:** `deepseek/deepseek-r1-0528-qwen3-8b`
+- **Local Server:** `http://localhost:1234/v1`
 
-#### LLM Model
+#### 🔬 Clinical-BERT Embeddings  
+The system uses **Clinical-BERT** (`emilyalsentzer/Bio_ClinicalBERT`) for medical-specialized embeddings:
+
+- **Primary:** Clinical-BERT for superior medical text understanding
+- **Fallback:** LM Studio text embeddings API for reliability
+- **GPU Support:** Automatic CUDA utilization (~500MB-1GB VRAM)
+- **Auto-Loading:** Downloads on first run (~500MB), cached locally
+
+#### 🔄 Hybrid Embedding System
 ```
-deepseek/deepseek-r1-0528-qwen3-8b
+Medical Text → Clinical-BERT (local GPU) → FAISS Index
+             ↓ (if Clinical-BERT unavailable)
+             → LM Studio API → FAISS Index  
 ```
 
-#### Embedding Model  
-```
-text-embedding-all-minilm-l6-v2-embedding
-```
-
-**Note:** If you're using different models, update the model names in the configuration section of `emergency_rag_chatbot.py`.
+**Benefits of Clinical-BERT:**
+- Medical terminology understanding
+- Clinical concept relationships
+- Evidence-based medicine optimization
+- Superior performance on medical literature
 
 ### 📚 Usage
 
@@ -76,7 +103,37 @@ pip install gradio requests PyPDF2 numpy faiss-cpu
 ### 📋 System Requirements
 
 - **Python:** 3.11+
-- **RAM:** 4GB+ recommended
+- **RAM:** 4GB+ recommended (8GB+ for optimal performance)
+- **Storage:** 2GB+ free space (Clinical-BERT model cache)
+- **GPU:** CUDA-compatible GPU recommended for Clinical-BERT
+  - **VRAM:** 500MB-1GB for Clinical-BERT embeddings
+  - **Fallback:** CPU processing available if no GPU
+- **Network:** Internet connection for initial Clinical-BERT download
+
+### 🔧 Dependencies
+
+#### Core Libraries
+```bash
+pip install gradio requests PyPDF2 numpy faiss-cpu
+```
+
+#### Medical Embedding Support  
+```bash
+pip install sentence-transformers transformers torch
+```
+
+#### GPU Support (optional but recommended)
+```bash
+# For NVIDIA GPUs
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+```
+
+### ⚡ Performance Notes
+
+- **First Run:** Clinical-BERT downloads automatically (~500MB)
+- **GPU Usage:** Clinical-BERT utilizes CUDA for faster embeddings
+- **Fallback Mode:** Automatically switches to LM Studio if Clinical-BERT unavailable
+- **Memory:** Clinical-BERT loads into GPU memory for optimal performance
 - **Storage:** 1GB+ for models and documents
 - **Network:** Access to LM Studio API endpoint
 
@@ -88,4 +145,3 @@ pip install gradio requests PyPDF2 numpy faiss-cpu
 - **Focus:** Emergency Medicine Research & Practice
 
 💡 **Tip:** Use `@llm` at the start of your question for general knowledge (bypasses RAG)
-
